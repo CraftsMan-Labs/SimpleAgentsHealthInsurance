@@ -790,12 +790,12 @@ wheels = [
 
 [[package]]
 name = "simple-agents-py"
-version = "0.3.9"
+version = "0.3.10"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/61/e1/bc50b47365544400bd5185761c3cc1e37cd21d0ba24e7047f73914207b23/simple_agents_py-0.3.9.tar.gz", hash = "sha256:cd60c0da8b2c29083edc4ea7cf4256143e710115ba5495e7894eb69aa892e921", size = 252798, upload-time = "2026-04-07T20:05:49.38Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/06/d6/0f9787ff20c794da76e70273fc592681a6333354afaafe2355d0c25f8e9e/simple_agents_py-0.3.10.tar.gz", hash = "sha256:dc51996639e1f519909f687e1691fea118775bd9734b72747dc6d7eb686ac55b", size = 253035, upload-time = "2026-04-08T19:43:58.915Z" }
 
 [[package]]
 name = "simpleagentshealthinsurance"
@@ -810,7 +810,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "python-dotenv", specifier = "==1.2.2" },
-    { name = "simple-agents-py", specifier = "==0.3.9" },
+    { name = "simple-agents-py", specifier = "==0.3.10" },
     { name = "streamlit", specifier = "==1.56.0" },
 ]
 

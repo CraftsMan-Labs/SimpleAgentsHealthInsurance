@@ -19,7 +19,7 @@ nodes:
   - id: validate_documents
     node_type:
       llm_call:
-        model: gemini-3-flash
+        model: ollama-lfm2
         messages_path: input.messages
         append_prompt_as_user: true
         stream: true
@@ -73,7 +73,7 @@ nodes:
   - id: terminate_missing_docs
     node_type:
       llm_call:
-        model: gemini-3-flash
+        model: ollama-lfm2
         messages_path: input.messages
         append_prompt_as_user: true
         stream: true
@@ -115,7 +115,7 @@ nodes:
   - id: process_underwriting_coverage
     node_type:
       llm_call:
-        model: gemini-3-flash
+        model: ollama-lfm2
         messages_path: input.messages
         append_prompt_as_user: true
         stream: true
@@ -176,7 +176,7 @@ nodes:
   - id: terminate_underwriting
     node_type:
       llm_call:
-        model: gemini-3-flash
+        model: ollama-lfm2
         messages_path: input.messages
         append_prompt_as_user: true
         stream: true
@@ -219,7 +219,7 @@ nodes:
   - id: process_risk_assessment
     node_type:
       llm_call:
-        model: gemini-3-flash
+        model: ollama-lfm2
         messages_path: input.messages
         append_prompt_as_user: true
         stream: true
@@ -275,7 +275,7 @@ nodes:
   - id: terminate_risk_assessment
     node_type:
       llm_call:
-        model: gemini-3-flash
+        model: ollama-lfm2
         messages_path: input.messages
         append_prompt_as_user: true
         stream: true
@@ -317,7 +317,7 @@ nodes:
   - id: process_premium_calculation
     node_type:
       llm_call:
-        model: gemini-3-flash
+        model: ollama-lfm2
         messages_path: input.messages
         append_prompt_as_user: true
         stream: true
@@ -373,7 +373,7 @@ nodes:
   - id: terminate_premium
     node_type:
       llm_call:
-        model: gemini-3-flash
+        model: ollama-lfm2
         messages_path: input.messages
         append_prompt_as_user: true
         stream: true
@@ -415,7 +415,7 @@ nodes:
   - id: process_final_approval
     node_type:
       llm_call:
-        model: gemini-3-flash
+        model: ollama-lfm2
         messages_path: input.messages
         append_prompt_as_user: true
         stream: true
@@ -468,7 +468,7 @@ nodes:
   - id: terminate_approval
     node_type:
       llm_call:
-        model: gemini-3-flash
+        model: ollama-lfm2
         messages_path: input.messages
         append_prompt_as_user: true
         stream: true
@@ -509,7 +509,7 @@ nodes:
   - id: process_policy_issuance
     node_type:
       llm_call:
-        model: gemini-3-flash
+        model: ollama-lfm2
         messages_path: input.messages
         append_prompt_as_user: true
         stream: true
@@ -549,10 +549,11 @@ nodes:
   - id: finalize_success
     node_type:
       llm_call:
-        model: gemini-3-flash
+        model: ollama-lfm2
         messages_path: input.messages
         append_prompt_as_user: true
-        stream: true
+        temperature: 0.5
+        stream: false
         heal: true
     config:
       output_schema:
@@ -583,8 +584,16 @@ nodes:
         Approval: {{ globals.approval_decision }}
         
         Return JSON only:
-        {"status": "success", "message": "Application approved and policy issued",
-         "policy_details": {"policy_number": "...", "premium": 0, "coverage_type": "..."}}
+        {"status": "success", 
+        "message": "Application approved and policy issued",
+        "policy_details": {
+            "policy_number": "...", 
+            "premium": 0, 
+            "coverage_type": "...",
+            "coverage_start_date": "YYYY-MM-DD",
+            "coverage_end_date": "YYYY-MM-DD",
+            "summary": "Your health insurance policy has been issued..."
+        }}
 
 edges:
   - from: extract_documents

@@ -29,11 +29,12 @@ TERMINATION_NODE_IDS = [
 
 
 def _stream_delta_from_event(event: WorkflowStreamEvent) -> str | None:
-    if "delta" in event:
-        return event["delta"]
-    if "event_type" in event:
-        if event["event_type"] == "workflow_completed":
-            return json.dumps(event["metadata"], indent=2)
+    event_type = event.get("event_type")
+    delta = event.get("delta")
+    if event_type in ("node_stream_delta", "node_stream_output_delta") and isinstance(
+        delta, str
+    ):
+        return delta
     return None
 
 
