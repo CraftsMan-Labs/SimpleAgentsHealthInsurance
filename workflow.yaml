@@ -1,0 +1,623 @@
+id: health-insurance-pipeline
+version: 1.0.0
+entry_node: extract_documents
+
+nodes:
+  # ===== STAGE 1: Document Extraction =====
+  - id: extract_documents
+    node_type:
+      custom_worker:
+        handler: extract_pdf_text
+    config:
+      payload:
+        input_text: "{{ input.messages[-1].content }}"
+      set_globals:
+        extracted_text: payload.extracted_text
+        doc_count: payload.doc_count
+
+  # ===== STAGE 2: Document Validation =====
+  - id: validate_documents
+    node_type:
+      llm_call:
+        model: gemini-3-flash
+        messages_path: input.messages
+        append_prompt_as_user: true
+        stream: true
+        heal: true
+    config:
+      output_schema:
+        type: object
+        properties:
+          expected_docs:
+            type: array
+            items:
+              type: string
+          provided_docs:
+            type: array
+            items:
+              type: string
+          missing_docs:
+            type: array
+            items:
+              type: string
+          is_valid:
+            type: boolean
+          validation_notes:
+            type: string
+        required: [expected_docs, provided_docs, missing_docs, is_valid, validation_notes]
+        additionalProperties: false
+      prompt: |
+        Based on the health insurance application, identify what documents are expected 
+        and what documents were provided. Extract the document list from the input.
+        Return JSON only:
+        {"expected_docs": ["ID", "Proof of Income", "Medical History", ...], 
+         "provided_docs": ["ID", "Medical History"], 
+         "missing_docs": ["Proof of Income"], 
+         "is_valid": true/false, 
+         "validation_notes": "..."}
+      set_globals:
+        doc_status: nodes.validate_documents.output.is_valid
+        missing_documents: nodes.validate_documents.output.missing_docs
+        provided_documents: nodes.validate_documents.output.provided_docs
+        validation_notes: nodes.validate_documents.output.validation_notes
+
+  - id: route_doc_validation
+    node_type:
+      switch:
+        branches:
+          - condition: '$.nodes.validate_documents.output.is_valid == false'
+            target: terminate_missing_docs
+        default: process_underwriting_coverage
+
+  # ===== Terminate: Missing Documents =====
+  - id: terminate_missing_docs
+    node_type:
+      llm_call:
+        model: gemini-3-flash
+        messages_path: input.messages
+        append_prompt_as_user: true
+        stream: true
+        heal: true
+    config:
+      output_schema:
+        type: object
+        properties:
+          to:
+            type: string
+          from:
+            type: string
+          subject:
+            type: string
+          body:
+            type: string
+          action_required:
+            type: string
+          stage_failed:
+            type: string
+          reason:
+            type: string
+        required: [to, from, subject, body, action_required, stage_failed, reason]
+        additionalProperties: false
+      prompt: |
+        Generate a termination email for document validation failure.
+        Missing documents: {{ globals.missing_documents }}
+        Provided documents: {{ globals.provided_documents }}
+        Notes: {{ globals.validation_notes }}
+        Return JSON only:
+        {"to": "applicant@email.com", "from": "insurance@company.com", 
+         "subject": "Application Incomplete - Missing Documents", 
+         "body": "We received your application but the following documents are missing: ...",
+         "action_required": "Upload missing documents", 
+         "stage_failed": "Document Validation",
+         "reason": "Missing required documents: ..."}
+
+  # ===== STAGE 3: Underwriting + Coverage Review (Node 1) =====
+  - id: process_underwriting_coverage
+    node_type:
+      llm_call:
+        model: gemini-3-flash
+        messages_path: input.messages
+        append_prompt_as_user: true
+        stream: true
+        heal: true
+    config:
+      output_schema:
+        type: object
+        properties:
+          coverage_eligible:
+            type: boolean
+          coverage_type:
+            type: string
+          underwriting_status:
+            type: string
+          coverage_details:
+            type: string
+          issues_found:
+            type: array
+            items:
+              type: string
+          terminate:
+            type: boolean
+          termination_reason:
+            type: string
+        required: [coverage_eligible, coverage_type, underwriting_status, coverage_details, issues_found, terminate, termination_reason]
+        additionalProperties: false
+      prompt: |
+        Analyze the application data for underwriting and coverage review.
+        Extracted text from documents: {{ globals.extracted_text }}
+        Document status: {{ globals.doc_status }}
+        
+        Determine:
+        - Is the applicant eligible for coverage?
+        - What type of coverage (basic, standard, premium)?
+        - Any issues that would require termination?
+        
+        Return JSON only:
+        {"coverage_eligible": true/false, "coverage_type": "basic|standard|premium",
+         "underwriting_status": "approved|pending|denied", "coverage_details": "...",
+         "issues_found": ["issue1", "issue2"], "terminate": true/false, 
+         "termination_reason": "..." if terminate=true}
+         If there is no termination reason, set it to "No termination reason".
+      set_globals:
+        underwriting_status: nodes.process_underwriting_coverage.output.underwriting_status
+        coverage_type: nodes.process_underwriting_coverage.output.coverage_type
+        coverage_details: nodes.process_underwriting_coverage.output.coverage_details
+        coverage_eligible: nodes.process_underwriting_coverage.output.coverage_eligible
+
+  - id: route_underwriting
+    node_type:
+      switch:
+        branches:
+          - condition: '$.nodes.process_underwriting_coverage.output.terminate == true'
+            target: terminate_underwriting
+        default: process_risk_assessment
+
+  # ===== Terminate: Underwriting Issues =====
+  - id: terminate_underwriting
+    node_type:
+      llm_call:
+        model: gemini-3-flash
+        messages_path: input.messages
+        append_prompt_as_user: true
+        stream: true
+        heal: true
+    config:
+      output_schema:
+        type: object
+        properties:
+          to:
+            type: string
+          from:
+            type: string
+          subject:
+            type: string
+          body:
+            type: string
+          action_required:
+            type: string
+          stage_failed:
+            type: string
+          reason:
+            type: string
+        required: [to, from, subject, body, action_required, stage_failed, reason]
+        additionalProperties: false
+      prompt: |
+        Generate termination email for underwriting failure.
+        Coverage eligible: {{ globals.coverage_eligible }}
+        Underwriting status: {{ globals.underwriting_status }}
+        Coverage details: {{ globals.coverage_details }}
+        Issues found: {{ nodes.process_underwriting_coverage.output.issues_found }}
+        Return JSON only:
+        {"to": "applicant@email.com", "from": "insurance@company.com",
+         "subject": "Application Underwriting Review - Status Update",
+         "body": "After reviewing your application, we are unable to proceed because: ...",
+         "action_required": "Contact us for more information",
+         "stage_failed": "Underwriting + Coverage Review",
+         "reason": "..."}
+
+  # ===== STAGE 4: Risk Assessment (Node 2) =====
+  - id: process_risk_assessment
+    node_type:
+      llm_call:
+        model: gemini-3-flash
+        messages_path: input.messages
+        append_prompt_as_user: true
+        stream: true
+        heal: true
+    config:
+      output_schema:
+        type: object
+        properties:
+          risk_level:
+            type: string
+            enum: [low, medium, high, very_high]
+          risk_factors:
+            type: array
+            items:
+              type: string
+          risk_score:
+            type: number
+          terminate:
+            type: boolean
+          termination_reason:
+            type: string
+        required: [risk_level, risk_factors, risk_score, terminate, termination_reason]
+        additionalProperties: false
+      prompt: |
+        Perform risk assessment based on application data.
+        Coverage type: {{ globals.coverage_type }}
+        Underwriting status: {{ globals.underwriting_status }}
+        Extracted text: {{ globals.extracted_text }}
+        
+        Evaluate risk level (low, medium, high, very_high) and identify risk factors.
+        
+        Return JSON only:
+        {"risk_level": "low|medium|high|very_high", 
+         "risk_factors": ["factor1", "factor2"],
+         "risk_score": 0-100,
+         "terminate": true/false,
+         "termination_reason": "..." if terminate=true}
+         If there is no termination reason, set it to "No termination reason".
+      set_globals:
+        risk_level: nodes.process_risk_assessment.output.risk_level
+        risk_factors: nodes.process_risk_assessment.output.risk_factors
+        risk_score: nodes.process_risk_assessment.output.risk_score
+
+  - id: route_risk_assessment
+    node_type:
+      switch:
+        branches:
+          - condition: '$.nodes.process_risk_assessment.output.terminate == true'
+            target: terminate_risk_assessment
+        default: process_premium_calculation
+
+  # ===== Terminate: High Risk =====
+  - id: terminate_risk_assessment
+    node_type:
+      llm_call:
+        model: gemini-3-flash
+        messages_path: input.messages
+        append_prompt_as_user: true
+        stream: true
+        heal: true
+    config:
+      output_schema:
+        type: object
+        properties:
+          to:
+            type: string
+          from:
+            type: string
+          subject:
+            type: string
+          body:
+            type: string
+          action_required:
+            type: string
+          stage_failed:
+            type: string
+          reason:
+            type: string
+        required: [to, from, subject, body, action_required, stage_failed, reason]
+        additionalProperties: false
+      prompt: |
+        Generate termination email for risk assessment failure.
+        Risk level: {{ globals.risk_level }}
+        Risk score: {{ globals.risk_score }}
+        Risk factors: {{ globals.risk_factors }}
+        Return JSON only:
+        {"to": "applicant@email.com", "from": "insurance@company.com",
+         "subject": "Application Risk Assessment - High Risk Determination",
+         "body": "Based on our risk assessment, we are unable to offer coverage at this time because: ...",
+         "action_required": "Consider alternative coverage options",
+         "stage_failed": "Risk Assessment",
+         "reason": "..."}
+
+  # ===== STAGE 5: Premium Calculation (Node 3) =====
+  - id: process_premium_calculation
+    node_type:
+      llm_call:
+        model: gemini-3-flash
+        messages_path: input.messages
+        append_prompt_as_user: true
+        stream: true
+        heal: true
+    config:
+      output_schema:
+        type: object
+        properties:
+          premium_amount:
+            type: number
+          pricing_factors:
+            type: array
+            items:
+              type: string
+          payment_plan:
+            type: string
+          valid_premium:
+            type: boolean
+          terminate:
+            type: boolean
+          termination_reason:
+            type: string
+        required: [premium_amount, pricing_factors, payment_plan, valid_premium, terminate, termination_reason]
+        additionalProperties: false
+      prompt: |
+        Calculate premium based on risk assessment.
+        Risk level: {{ globals.risk_level }}
+        Risk score: {{ globals.risk_score }}
+        Coverage type: {{ globals.coverage_type }}
+        
+        Calculate monthly premium and identify pricing factors.
+        Return JSON only:
+        {"premium_amount": 0.00, "pricing_factors": ["factor1", "factor2"],
+         "payment_plan": "monthly|quarterly|annual",
+         "valid_premium": true/false,
+         "terminate": true/false,
+         "termination_reason": "..." if terminate=true}
+         If there is no termination reason, set it to "No termination reason".
+      set_globals:
+        premium_amount: nodes.process_premium_calculation.output.premium_amount
+        pricing_factors: nodes.process_premium_calculation.output.pricing_factors
+        payment_plan: nodes.process_premium_calculation.output.payment_plan
+
+  - id: route_premium_calc
+    node_type:
+      switch:
+        branches:
+          - condition: '$.nodes.process_premium_calculation.output.terminate == true'
+            target: terminate_premium
+        default: process_final_approval
+
+  # ===== Terminate: Premium Calculation Issues =====
+  - id: terminate_premium
+    node_type:
+      llm_call:
+        model: gemini-3-flash
+        messages_path: input.messages
+        append_prompt_as_user: true
+        stream: true
+        heal: true
+    config:
+      output_schema:
+        type: object
+        properties:
+          to:
+            type: string
+          from:
+            type: string
+          subject:
+            type: string
+          body:
+            type: string
+          action_required:
+            type: string
+          stage_failed:
+            type: string
+          reason:
+            type: string
+        required: [to, from, subject, body, action_required, stage_failed, reason]
+        additionalProperties: false
+      prompt: |
+        Generate termination email for premium calculation failure.
+        Premium amount: {{ globals.premium_amount }}
+        Pricing factors: {{ globals.pricing_factors }}
+        Valid premium: {{ nodes.process_premium_calculation.output.valid_premium }}
+        Return JSON only:
+        {"to": "applicant@email.com", "from": "insurance@company.com",
+         "subject": "Application Premium Calculation - Unable to Process",
+         "body": "We were unable to calculate a premium for your application because: ...",
+         "action_required": "Contact us to discuss options",
+         "stage_failed": "Premium Calculation",
+         "reason": "..."}
+
+  # ===== STAGE 6: Final Approval (Node 4) =====
+  - id: process_final_approval
+    node_type:
+      llm_call:
+        model: gemini-3-flash
+        messages_path: input.messages
+        append_prompt_as_user: true
+        stream: true
+        heal: true
+    config:
+      output_schema:
+        type: object
+        properties:
+          approval_decision:
+            type: string
+            enum: [approved, denied, conditional]
+          conditions:
+            type: array
+            items:
+              type: string
+          approval_date:
+            type: string
+          terminate:
+            type: boolean
+          termination_reason:
+            type: string
+        required: [approval_decision, conditions, approval_date, terminate, termination_reason]
+        additionalProperties: false
+      prompt: |
+        Make final approval decision based on all assessments.
+        Underwriting status: {{ globals.underwriting_status }}
+        Risk level: {{ globals.risk_level }}
+        Premium: {{ globals.premium_amount }}
+        
+        Return JSON only:
+        {"approval_decision": "approved|denied|conditional",
+         "conditions": ["condition1"],
+         "approval_date": "YYYY-MM-DD",
+         "terminate": true/false,
+         "termination_reason": "..." if terminate=true}
+         If there is no termination reason, set it to "No termination reason".
+      set_globals:
+        approval_decision: nodes.process_final_approval.output.approval_decision
+        approval_conditions: nodes.process_final_approval.output.conditions
+
+  - id: route_final_approval
+    node_type:
+      switch:
+        branches:
+          - condition: '$.nodes.process_final_approval.output.terminate == true'
+            target: terminate_approval
+        default: process_policy_issuance
+
+  # ===== Terminate: Approval Denial =====
+  - id: terminate_approval
+    node_type:
+      llm_call:
+        model: gemini-3-flash
+        messages_path: input.messages
+        append_prompt_as_user: true
+        stream: true
+        heal: true
+    config:
+      output_schema:
+        type: object
+        properties:
+          to:
+            type: string
+          from:
+            type: string
+          subject:
+            type: string
+          body:
+            type: string
+          action_required:
+            type: string
+          stage_failed:
+            type: string
+          reason:
+            type: string
+        required: [to, from, subject, body, action_required, stage_failed, reason]
+        additionalProperties: false
+      prompt: |
+        Generate termination email for final approval denial.
+        Decision: {{ nodes.process_final_approval.output.approval_decision }}
+        Conditions: {{ nodes.process_final_approval.output.conditions }}
+        Return JSON only:
+        {"to": "applicant@email.com", "from": "insurance@company.com",
+         "subject": "Application Final Decision",
+         "body": "After comprehensive review, we are unable to approve your application because: ...",
+         "action_required": "Contact us for appeal options",
+         "stage_failed": "Final Approval",
+         "reason": "..."}
+
+  # ===== STAGE 7: Policy Issuance (Node 5) =====
+  - id: process_policy_issuance
+    node_type:
+      llm_call:
+        model: gemini-3-flash
+        messages_path: input.messages
+        append_prompt_as_user: true
+        stream: true
+        heal: true
+    config:
+      output_schema:
+        type: object
+        properties:
+          policy_number:
+            type: string
+          policy_type:
+            type: string
+          coverage_start_date:
+            type: string
+          coverage_end_date:
+            type: string
+          summary:
+            type: string
+        required: [policy_number, policy_type, coverage_start_date, coverage_end_date, summary]
+        additionalProperties: false
+      prompt: |
+        Generate policy issuance details.
+        Approval decision: {{ globals.approval_decision }}
+        Coverage type: {{ globals.coverage_type }}
+        Premium: {{ globals.premium_amount }}
+        Payment plan: {{ globals.payment_plan }}
+        
+        Return JSON only:
+        {"policy_number": "POL-XXXXX", "policy_type": "Health Insurance",
+         "coverage_start_date": "YYYY-MM-DD", "coverage_end_date": "YYYY-MM-DD",
+         "summary": "Your health insurance policy has been issued..."}
+      set_globals:
+        policy_number: nodes.process_policy_issuance.output.policy_number
+        policy_issued: "true"
+
+  # ===== Success: Final Output =====
+  - id: finalize_success
+    node_type:
+      llm_call:
+        model: gemini-3-flash
+        messages_path: input.messages
+        append_prompt_as_user: true
+        stream: true
+        heal: true
+    config:
+      output_schema:
+        type: object
+        properties:
+          status:
+            type: string
+          message:
+            type: string
+          policy_details:
+            type: object
+            properties:
+              policy_number:
+                type: string
+              premium:
+                type: number
+              coverage_type:
+                type: string
+            required: [policy_number, premium, coverage_type]
+            additionalProperties: false
+        required: [status, message, policy_details]
+        additionalProperties: false
+      prompt: |
+        Generate final success message with all policy details.
+        Policy number: {{ globals.policy_number }}
+        Premium: {{ globals.premium_amount }}
+        Coverage: {{ globals.coverage_type }}
+        Approval: {{ globals.approval_decision }}
+        
+        Return JSON only:
+        {"status": "success", "message": "Application approved and policy issued",
+         "policy_details": {"policy_number": "...", "premium": 0, "coverage_type": "..."}}
+
+edges:
+  - from: extract_documents
+    to: validate_documents
+  - from: validate_documents
+    to: route_doc_validation
+  - from: route_doc_validation
+    to: terminate_missing_docs
+  - from: route_doc_validation
+    to: process_underwriting_coverage
+  - from: process_underwriting_coverage
+    to: route_underwriting
+  - from: route_underwriting
+    to: terminate_underwriting
+  - from: route_underwriting
+    to: process_risk_assessment
+  - from: process_risk_assessment
+    to: route_risk_assessment
+  - from: route_risk_assessment
+    to: terminate_risk_assessment
+  - from: route_risk_assessment
+    to: process_premium_calculation
+  - from: process_premium_calculation
+    to: route_premium_calc
+  - from: route_premium_calc
+    to: terminate_premium
+  - from: route_premium_calc
+    to: process_final_approval
+  - from: process_final_approval
+    to: route_final_approval
+  - from: route_final_approval
+    to: terminate_approval
+  - from: route_final_approval
+    to: process_policy_issuance
+  - from: process_policy_issuance
+    to: finalize_success

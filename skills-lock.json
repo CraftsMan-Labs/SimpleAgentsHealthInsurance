@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "skills": {
+    "simpleagents-builder": {
+      "source": "CraftsMan-Labs/SimpleAgents",
+      "sourceType": "github",
+      "computedHash": "12b07ec138ef134ae1ee13f9af9b21268d7d21e2e05aacf0bb9bb82677da37fc"
+    },
+    "simpleagentsbuilder": {
+      "source": "CraftsMan-Labs/SimpleAgents",
+      "sourceType": "github",
+      "computedHash": "2f03f06f1b9719449bf143812467e01269571c24c5d2aad018ad8fdf23abbeee"
+    }
+  }
+}
